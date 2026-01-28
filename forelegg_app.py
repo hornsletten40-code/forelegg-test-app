@@ -183,6 +183,8 @@ if query:
             st.caption("⚠️ Veiledende informasjon – ikke vedtak")
         else:
             persons, data = parse_text(query)
+            st.write("DEBUG – tolket data:", persons, data)
+
             excesses, single, optimal, dist = calculate(data, persons)
 
             st.markdown(f"### 📊 Vurdering ({persons} reisende)")
@@ -208,3 +210,4 @@ if query:
                             st.markdown(f"- Person {i}: {a} {UNITS[k]}")
 
             st.caption("📚 Vareførselsforskriften kap. 12-11 • Veiledende")
+
