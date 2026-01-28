@@ -3,7 +3,7 @@ import re
 from itertools import product
 
 # ============================================================
-# KONFIG
+# KONFIGURASJON
 # ============================================================
 
 MAX_FORELEGG = 20000
@@ -41,35 +41,15 @@ UNITS = {
 }
 
 # ============================================================
-# RESTRIKSJONSBELAGTE VARER (v1)
+# RESTRIKSJONSBELAGTE VARER
 # ============================================================
 
 RESTRICTED_ITEMS = {
-    "pepperspray": {
-        "status": "forbudt",
-        "reaction": "Beslag og straffesak",
-        "law": "Våpenforskriften § 3"
-    },
-    "fyrverkeri": {
-        "status": "tillatelse",
-        "reaction": "Beslag / anmeldelse ved manglende tillatelse",
-        "law": "Forskrift om håndtering av eksplosjonsfarlig stoff"
-    },
-    "kniv": {
-        "status": "avhengig",
-        "reaction": "Kan beslaglegges",
-        "law": "Våpenloven § 5"
-    },
-    "narkotika": {
-        "status": "forbudt",
-        "reaction": "Straffesak",
-        "law": "Legemiddelloven / straffeloven"
-    },
-    "legemidler": {
-        "status": "tillatelse",
-        "reaction": "Dokumentasjonskrav",
-        "law": "Legemiddelloven"
-    }
+    "pepperspray": ("Forbudt", "Beslag og straffesak", "Våpenforskriften § 3"),
+    "fyrverkeri": ("Tillatelse", "Beslag ved manglende tillatelse", "Forskrift om eksplosjonsfarlig stoff"),
+    "kniv": ("Avhengig", "Kan beslaglegges", "Våpenloven § 5"),
+    "narkotika": ("Forbudt", "Straffesak", "Legemiddelloven / straffeloven"),
+    "legemiddel": ("Tillatelse", "Dokumentasjonskrav", "Legemiddelloven")
 }
 
 # ============================================================
@@ -118,33 +98,45 @@ def calculate(data, persons):
     return excesses, single, optimal, dist
 
 # ============================================================
-# FORBEDRET TEKSTTOLKING
+# FORBEDRET TEKSTTOLKING (ROBUST)
 # ============================================================
 
 def normalize(text):
     return text.lower().replace(",", ".")
 
+def extract_number(pattern, text):
+    m = re.search(pattern, text)
+    return float(m.group(1)) if m else 0
+
 def parse_text(text):
     t = normalize(text)
 
-    def num(p):
-        m = re.search(p, t)
-        return float(m.group(1)) if m else 0
+    persons = int(extract_number(r"(\d+)\s*(person|pers)", t)) or 1
 
-    persons = int(num(r"(\d+)\s*(person|pers)")) or 1
+    # ØL
+    beer = 0
+    beer += extract_number(r"(\d+)\s*kasse", t) * 12
+    beer += extract_number(r"(\d+)\s*(flaske|boks)", t) * 0.5
+    beer += extract_number(r"(\d+(\.\d+)?)\s*(l|liter)\s*(med\s*)?øl", t)
 
-    beer = num(r"(\d+)\s*kasse\s*øl") * 12 + num(r"(\d+(\.\d+)?)\s*liter\s*øl")
-    beer += num(r"(\d+)\s*(boks|flaske)\s*øl") * 0.5
+    # VIN
+    wine = 0
+    wine += extract_number(r"(\d+)\s*flaske\s*vin", t) * 0.75
+    wine += extract_number(r"(\d+(\.\d+)?)\s*(l|liter)\s*(med\s*)?vin", t)
 
-    wine = num(r"(\d+)\s*flaske\s*vin") * 0.75 + num(r"(\d+(\.\d+)?)\s*liter\s*vin")
-
-    spirits = num(r"(\d+(\.\d+)?)\s*liter\s*(sprit|brennevin)")
+    # SPRIT
+    spirits = extract_number(r"(\d+(\.\d+)?)\s*(l|liter)\s*(med\s*)?(sprit|brennevin)", t)
     if "halv liter" in t or "½ liter" in t:
         spirits += 0.5
 
-    cigarettes = int(num(r"(\d+)\s*kartong")) * 200 + int(num(r"(\d+)\s*pakke")) * 20
+    # SIGARETTER
+    cigarettes = 0
+    cigarettes += int(extract_number(r"(\d+)\s*kartong", t)) * 200
+    cigarettes += int(extract_number(r"(\d+)\s*pakke", t)) * 20
+    cigarettes += int(extract_number(r"(\d+)\s*(sigaretter|sigg)", t))
 
-    tobacco = num(r"(\d+)\s*(g|gram)\s*(snus|tobakk)")
+    # TOBAKK
+    tobacco = extract_number(r"(\d+(\.\d+)?)\s*(g|gram)\s*(snus|tobakk)", t)
 
     return persons, {
         "beer_l": beer,
@@ -155,14 +147,16 @@ def parse_text(text):
     }
 
 def check_restricted(text):
-    for item, info in RESTRICTED_ITEMS.items():
+    for item, data in RESTRICTED_ITEMS.items():
         if item in text.lower():
-            return item, info
+            return item, data
     return None, None
 
 # ============================================================
 # STREAMLIT UI
 # ============================================================
+
+st.set_page_config(page_title="KI-agent – forelegg", layout="centered")
 
 st.title("🤖 KI-agent – Toll / forelegg")
 st.caption("Skriv hva de reisende har med seg – eller spør om en vare")
@@ -176,38 +170,45 @@ if query:
 
     with st.chat_message("assistant"):
         if item:
+            status, reaction, law = info
             st.markdown(f"### ⚠️ Restriksjonsbelagt vare: **{item}**")
-            st.markdown(f"- **Status:** {info['status']}")
-            st.markdown(f"- **Reaksjon:** {info['reaction']}")
-            st.markdown(f"- **Hjemmel:** {info['law']}")
+            st.markdown(f"- **Status:** {status}")
+            st.markdown(f"- **Reaksjon:** {reaction}")
+            st.markdown(f"- **Hjemmel:** {law}")
             st.caption("⚠️ Veiledende informasjon – ikke vedtak")
         else:
             persons, data = parse_text(query)
-            st.write("DEBUG – tolket data:", persons, data)
+
+            # DEBUG – kan fjernes senere
+            # st.write("DEBUG:", persons, data)
 
             excesses, single, optimal, dist = calculate(data, persons)
 
-            st.markdown(f"### 📊 Vurdering ({persons} reisende)")
-            for k, v in excesses.items():
-                if v > 0:
-                    st.markdown(f"- {LABELS[k]}: {v} {UNITS[k]}")
+            if sum(data.values()) == 0:
+                st.warning("Jeg klarte ikke å tolke mengder fra teksten. Prøv å være litt mer konkret.")
+            else:
+                st.markdown(f"### 📊 Vurdering ({persons} reisende)")
 
-            st.markdown(f"**Én person tar alt:** {single} kr")
-            st.markdown(f"**Optimal fordeling:** {optimal} kr")
+                st.markdown("**Overskytende mengde:**")
+                for k, v in excesses.items():
+                    if v > 0:
+                        st.markdown(f"- {LABELS[k]}: {v} {UNITS[k]}")
 
-            if optimal < single:
-                st.success("Optimal fordeling gir lavere samlet forelegg")
+                st.markdown(f"**Én person tar alt:** {single} kr")
+                st.markdown(f"**Optimal fordeling:** {optimal} kr")
 
-            if optimal > MAX_FORELEGG:
-                st.error("Overskrider maksgrense for forenklet forelegg")
+                if optimal < single:
+                    st.success("Optimal fordeling gir lavere samlet forelegg")
 
-            st.markdown("#### 👥 Optimal fordeling")
-            for k, d in dist.items():
-                if sum(d) > 0:
-                    st.markdown(f"**{LABELS[k]}**")
-                    for i, a in enumerate(d, 1):
-                        if a > 0:
-                            st.markdown(f"- Person {i}: {a} {UNITS[k]}")
+                if optimal > MAX_FORELEGG:
+                    st.error("Overskrider maksgrense for forenklet forelegg")
 
-            st.caption("📚 Vareførselsforskriften kap. 12-11 • Veiledende")
+                st.markdown("#### 👥 Optimal fordeling per person")
+                for k, d in dist.items():
+                    if sum(d) > 0:
+                        st.markdown(f"**{LABELS[k]}**")
+                        for i, a in enumerate(d, 1):
+                            if a > 0:
+                                st.markdown(f"- Person {i}: {a} {UNITS[k]}")
 
+                st.caption("📚 Vareførselsforskriften kap. 12-11 • Veiledende")
