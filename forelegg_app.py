@@ -1,11 +1,12 @@
 import streamlit as st
+import re
 from itertools import product
 
 # ============================================================
 # KONFIGURASJON / JURIDISK GRUNNLAG
 # ============================================================
 
-MAX_FORELEGG = 20000  # maksgrense for forenklet forelegg
+MAX_FORELEGG = 20000
 
 LEGAL_QUOTA = {
     "beer_l": 16,
@@ -39,14 +40,12 @@ LABELS = {
     "tobacco_g": "Tobakk / snus"
 }
 
-
 # ============================================================
 # REGELMOTOR
 # ============================================================
 
 def excess(total, quota, persons):
     return max(0, total - quota * persons)
-
 
 def fine_lookup(category, amount):
     if amount <= 0:
@@ -56,39 +55,29 @@ def fine_lookup(category, amount):
             return fine
     return FORELEGG_SATSER[category][-1][1]
 
-
 def optimal_distribution(category, excess_amount, persons):
-    """
-    Finner laveste samlede forelegg ved å fordele overskytende mengde
-    på flere personer (uten å dele beløp).
-    """
     if excess_amount <= 0:
         return 0, [0] * persons
 
     best_total = float("inf")
     best_dist = None
 
-    # Bruteforce – trygt for realistisk bruk (1–3 personer)
     for dist in product(range(excess_amount + 1), repeat=persons):
         if sum(dist) != excess_amount:
             continue
 
         total = sum(fine_lookup(category, d) for d in dist)
-
         if total < best_total:
             best_total = total
             best_dist = list(dist)
 
     return best_total, best_dist
 
-
 def calculate_optimal(data, persons):
     excesses = {k: excess(data[k], LEGAL_QUOTA[k], persons) for k in LEGAL_QUOTA}
 
-    # Alternativ 1 – én person tar alt
     single_total = sum(fine_lookup(k, excesses[k]) for k in excesses)
 
-    # Alternativ 2 – optimal fordeling
     optimal_total = 0
     distributions = {}
 
@@ -99,6 +88,28 @@ def calculate_optimal(data, persons):
 
     return excesses, single_total, optimal_total, distributions
 
+# ============================================================
+# TEKSTTOLKING (CHAT → STRUKTUR)
+# ============================================================
+
+def parse_chat(text):
+    text = text.lower()
+
+    def find(pattern):
+        m = re.search(pattern, text)
+        return float(m.group(1)) if m else 0
+
+    persons = int(find(r"(\d+)\s*(person|pers)")) or 1
+
+    data = {
+        "beer_l": find(r"(\d+(\.\d+)?)\s*liter\s*øl"),
+        "wine_l": find(r"(\d+(\.\d+)?)\s*liter\s*vin"),
+        "spirits_l": find(r"(\d+(\.\d+)?)\s*liter\s*(sprit|brennevin)"),
+        "cigarettes": int(find(r"(\d+)\s*(sigaretter|sigg)")),
+        "tobacco_g": find(r"(\d+)\s*(gram|g)\s*(snus|tobakk)")
+    }
+
+    return persons, data
 
 # ============================================================
 # STREAMLIT UI
@@ -106,62 +117,52 @@ def calculate_optimal(data, persons):
 
 st.set_page_config(page_title="Forelegg – KI-agent", layout="centered")
 
-st.title("🚨 Forenklet forelegg – KI-agent")
-st.caption("Vareførselsforskriften kapittel 12-11 • Beslutningsstøtte")
+st.title("🤖 KI-agent – Forenklet forelegg")
+st.caption("Skriv hva de reisende har med seg. Agenten vurderer billigste lovlige forelegg.")
 
 st.divider()
 
-persons = st.number_input("Antall reisende", min_value=1, step=1, value=1)
+chat_input = st.chat_input(
+    "Eksempel: 2 personer, 10 liter øl og 6 liter vin"
+)
 
-beer = st.number_input("Øl (liter)", min_value=0.0, step=0.5)
-wine = st.number_input("Vin (liter)", min_value=0.0, step=0.5)
-spirits = st.number_input("Sprit (liter)", min_value=0.0, step=0.5)
-cigarettes = st.number_input("Sigaretter (stk)", min_value=0, step=50)
-tobacco = st.number_input("Tobakk / snus (gram)", min_value=0.0, step=50.0)
-
-data = {
-    "beer_l": beer,
-    "wine_l": wine,
-    "spirits_l": spirits,
-    "cigarettes": cigarettes,
-    "tobacco_g": tobacco
-}
-
-if st.button("Beregn forelegg"):
+if chat_input:
+    persons, data = parse_chat(chat_input)
     excesses, single_total, optimal_total, distributions = calculate_optimal(data, persons)
 
-    st.divider()
-    st.subheader("📊 Resultat")
+    with st.chat_message("assistant"):
+        st.markdown("### 📊 Vurdering")
 
-    st.write("### Overskytende mengde")
-    for k, v in excesses.items():
-        if v > 0:
-            st.write(f"• **{LABELS[k]}:** {v} {UNITS[k]}")
+        st.markdown(f"**Antall reisende:** {persons}")
 
-    st.divider()
+        st.markdown("**Overskytende mengde:**")
+        for k, v in excesses.items():
+            if v > 0:
+                st.markdown(f"- {LABELS[k]}: {v} {UNITS[k]}")
 
-    st.write(f"**Alternativ 1 – én person tar alt:** {single_total} kr")
-    st.write(f"**Alternativ 2 – optimal fordeling:** {optimal_total} kr")
+        st.markdown("---")
+        st.markdown(f"**Alternativ 1 – én person tar alt:** {single_total} kr")
+        st.markdown(f"**Alternativ 2 – optimal fordeling:** {optimal_total} kr")
 
-    if optimal_total < single_total:
-        st.success("✅ Optimal fordeling av foreleggsvarer gir lavere samlet forelegg")
+        if optimal_total < single_total:
+            st.success("✅ Optimal fordeling av foreleggsvarer gir lavere samlet forelegg")
 
-    if optimal_total > MAX_FORELEGG:
-        st.error("❌ Overskrider maksgrense for forenklet forelegg")
-        st.warning("➡️ Saken bør vurderes for ordinær straffesaksbehandling")
+        if optimal_total > MAX_FORELEGG:
+            st.error("❌ Overskrider maksgrense for forenklet forelegg")
+            st.warning("➡️ Saken bør vurderes for ordinær straffesaksbehandling")
 
-    st.divider()
-    st.write("### Optimal fordeling per person")
+        st.markdown("---")
+        st.markdown("### 👥 Optimal fordeling per person")
 
-    for k, dist in distributions.items():
-        if sum(dist) > 0:
-            st.write(f"**{LABELS[k]}**")
-            for i, amount in enumerate(dist, start=1):
-                if amount > 0:
-                    st.write(f"– Person {i}: {amount} {UNITS[k]}")
+        for k, dist in distributions.items():
+            if sum(dist) > 0:
+                st.markdown(f"**{LABELS[k]}**")
+                for i, amount in enumerate(dist, start=1):
+                    if amount > 0:
+                        st.markdown(f"- Person {i}: {amount} {UNITS[k]}")
 
-    st.divider()
-    st.caption(
-        "📚 Hjemmel: Vareførselsforskriften kapittel 12-11 • "
-        "⚠️ Veiledende beregning – ikke vedtak"
-    )
+        st.markdown("---")
+        st.caption(
+            "📚 Hjemmel: Vareførselsforskriften kapittel 12-11 • "
+            "⚠️ Veiledende beregning – ikke vedtak"
+        )
