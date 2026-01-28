@@ -69,20 +69,35 @@ def fine_lookup(cat, amount):
 
 def optimal_distribution(cat, excess_amount, persons):
     if excess_amount <= 0:
-        return 0, [0]*persons
+        return 0, [0] * persons
+
+    # Bestem steg basert på varetype
+    if cat in ["beer_l", "wine_l", "spirits_l"]:
+        step = 0.5   # 0,5 liter steg
+    elif cat == "cigarettes":
+        step = 1     # stk
+    else:  # tobacco_g
+        step = 1     # gram
+
+    # Antall steg
+    steps = int(round(excess_amount / step))
 
     best_total = float("inf")
     best_dist = None
 
-    for dist in product(range(excess_amount + 1), repeat=persons):
-        if sum(dist) != excess_amount:
+    for dist_steps in product(range(steps + 1), repeat=persons):
+        if sum(dist_steps) != steps:
             continue
-        total = sum(fine_lookup(cat, d) for d in dist)
+
+        dist_amounts = [d * step for d in dist_steps]
+        total = sum(fine_lookup(cat, amt) for amt in dist_amounts)
+
         if total < best_total:
             best_total = total
-            best_dist = list(dist)
+            best_dist = dist_amounts
 
     return best_total, best_dist
+
 
 def calculate(data, persons):
     excesses = {k: excess(data[k], LEGAL_QUOTA[k], persons) for k in LEGAL_QUOTA}
@@ -212,3 +227,4 @@ if query:
                                 st.markdown(f"- Person {i}: {a} {UNITS[k]}")
 
                 st.caption("📚 Vareførselsforskriften kap. 12-11 • Veiledende")
+
